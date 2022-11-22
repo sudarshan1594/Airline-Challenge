@@ -1,0 +1,620 @@
+---
+title: "Airline Data Challenge Capital One "
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+Candidate Name : Sudarshan Ananthakrishnan
+
+# Airline Data Challenge Problem Statement
+
+An airline company is looking to enter the United States domestic market.Specifically,the company has decided to start with 5 round trip routes between medium and large US airports. An example of a round trip route is the combination of JFK to ORD and ORD to JFK. The airline company has to acquire 5 new airplanes (one per round trip route) and the upfront cost for each airplane is $90 million. Identifying the 5 best routes based on factors like occupancy rates, number of flights operating etc is the goal of the project.
+
+# Installing packages
+
+```{r Packages, message=FALSE}
+
+# install.packages("tidyverse")
+library(tidyverse)
+
+#install.packages('lubridate')
+library(lubridate)
+
+# install.packages('Hmisc')
+library(Hmisc)
+
+#install.packages('corrplot')
+library(corrplot)
+
+#install.packages('DT')
+library(DT)
+
+#install.packages('gt')
+library(gt)
+
+
+```
+
+
+# Importing Datasets
+
+```{r Datasets}
+airport_codes  <- read.csv("C:\\Users\\sudar\\Desktop\\Capital One Airline Data challenge\\data\\airport_codes.csv")
+
+flights <- read.csv("C:\\Users\\sudar\\Desktop\\Capital One Airline Data challenge\\data\\flights.csv")
+
+tickets <-  read.csv("C:\\Users\\sudar\\Desktop\\Capital One Airline Data challenge\\data\\tickets.csv")
+
+```
+
+
+# Data Exploration of Datasets
+
+```{r Airport Codes, message=TRUE}
+
+summary(airport_codes)
+
+# no changes required for the data types of columns in airport_codes
+
+#filtering this data set to include only medium size airports and large size airports in the US
+
+# Checking for any misspelled values of TYPES and ISO_Country that will be used in our filtering
+
+airport_codes %>% group_by(TYPE) %>% summarise(count=n())
+airport_codes %>% group_by(ISO_COUNTRY) %>% summarise(count=n())
+
+# creating the subset
+airport_codes_US <- airport_codes %>% 
+                    filter((TYPE == 'medium_airport' | TYPE == 'large_airport') & ISO_COUNTRY == 'US' & IATA_CODE != '') %>%
+                    select(IATA_CODE,NAME,TYPE)
+        
+
+airport_codes_US %>% group_by(TYPE) %>% summarise(count=n())
+```
+```{r Flights}
+
+summary(flights)
+
+#changing the datatypes pf these columns
+
+flights$FL_DATE <- ymd(flights$FL_DATE)
+flights$AIR_TIME <- as.numeric(flights$AIR_TIME)
+flights$DISTANCE <- as.numeric(flights$DISTANCE)
+
+# FL_date changed from character to date.
+# Air_time and Distance changed from character to numeric. Also, Airtime has too many missing values or NA's i.e. 58461. We will be excluding this column for our analysis.
+
+
+summary(flights)
+
+# Filtering the flights data to have only have information about flights to and from medium and large US airports
+
+flights_US <- flights %>%
+              filter(ORIGIN %in% (airport_codes_US$IATA_CODE) & DESTINATION %in% (airport_codes_US$IATA_CODE))
+              
+
+
+```
+```{r Tickets}
+summary(tickets)
+
+# Issues with datatype - ITIN_FARE
+
+tickets$ITIN_FARE = as.numeric(as.character(tickets$ITIN_FARE))
+
+summary(tickets)
+
+# Getting tickets data for only US origin and US destination airports and getting only round trip data
+
+tickets_US <- 
+  tickets %>% 
+    filter(ORIGIN %in% airport_codes_US$IATA_CODE & DESTINATION %in% airport_codes_US$IATA_CODE & ROUNDTRIP==1) 
+```
+
+
+Findings: 
+1. There are a total of 22,810 airports in the US of which 651 are medium 170 are large airports
+2. There are 1883141 records of flights operating from and to medium and large airports in the US for Q1 2019
+3. There are 684208 records of round trip tickets for trips in the US between airports that are either medium or large
+
+
+## Aggregating, joining data for further analysis
+```{r}
+
+# Aggregating the flights data set based on airlines to look at the number of flights operated by each airline
+# and getting airlines that operated more than 5000 flights for at least 10 weeks in Q1 2019
+
+airlines_filter <- flights_US %>% 
+group_by(OP_CARRIER,week=week(FL_DATE)) %>% 
+summarise(total_flights_per_week= n()) %>%
+filter(total_flights_per_week >= 5000) %>%
+group_by(OP_CARRIER) %>%
+summarise(weeks_count= n()) %>%
+filter(weeks_count >= 10)
+
+flights_US_line_chart <- flights_US %>% 
+mutate(week =week(FL_DATE)) %>%
+group_by(OP_CARRIER,week) %>% 
+summarise(total_flights_per_week = n(),
+          cancellation_rate = round(sum(CANCELLED == 1)/n(),2),
+          avg_arrival_delay = round(mean(ARR_DELAY,na.rm=TRUE),2),
+          avg_departure_delay = round(mean(DEP_DELAY,na.rm=TRUE),2),
+          avg_distance = round(mean(DISTANCE,na.rm=TRUE),2),
+          avg_occupancy_rate = round(mean(OCCUPANCY_RATE,na.rm = TRUE),2) ) %>%
+          filter(total_flights_per_week >= 5000 & OP_CARRIER %in% airlines_filter$OP_CARRIER)
+
+
+# Creating a function to display  various line charts for analysis
+
+challenge_line_chart <- function(dataset,column_name_x,column_name_y,group_column,title) {
+
+  column_name_x <- enquo(column_name_x)
+  
+  column_name_y <- enquo(column_name_y)
+  
+  group_column <- enquo(group_column)
+  
+ggplot(data = dataset, aes(x = !!column_name_x, y = !!column_name_y, group = !!group_column)) +
+  ggtitle(title) +
+  geom_line(aes(color = !!group_column)) +
+  xlab(column_name_x) +
+  ylab(column_name_y) + 
+  scale_color_brewer(palette="Set1")
+
+}
+
+challenge_line_chart(flights_US_line_chart,week,total_flights_per_week,OP_CARRIER,'Total Scheduled Flights in a week')
+challenge_line_chart(flights_US_line_chart,week,cancellation_rate,OP_CARRIER,'Cancellation Rate in a week')
+challenge_line_chart(flights_US_line_chart,week,avg_arrival_delay,OP_CARRIER,'Avg Arrival Delay in a week')
+challenge_line_chart(flights_US_line_chart,week,avg_departure_delay,OP_CARRIER,'Avg Dpearture Delay in a week')
+challenge_line_chart(flights_US_line_chart,week,avg_distance,OP_CARRIER,'Avg Distance Travelled in a week')
+challenge_line_chart(flights_US_line_chart,week,avg_occupancy_rate,OP_CARRIER,'Avg Occupancy rate over weeks')
+
+```
+
+Findings: 
+
+1. With ~25,000 flights WN(southwest airlines) operates the most number of flights in a week.
+2. MN(Envoy air or american eagle) operates ~5000 flights on an average per week. They have one of the highest flight cancellations at 15% in a given week on week 5. This figure is followed by OH(Pacific Southwest) with a 10% cancellation rate on week 8
+3. OO(Sky west) has both, the highest avg arrival delay ~20 min in week 6 and highest avg departure delays ~25 min in weeks 4 and 6.
+4. UA(United) tops the chart with avg distance covered with covering avg distance 1100+ miles every week.
+
+
+
+
+```{r}
+# creating a summarized variable to measure the percentage of occupancy rate greater than or equal to 75% for a origin-destination pair
+
+flights_US_Origin_Desitination_Pairs <- flights_US %>%
+    filter(CANCELLED == 0) %>% 
+      group_by(ORIGIN,ORIGIN_CITY_NAME,DESTINATION,DEST_CITY_NAME) %>% 
+        summarise(avg_arr_delay = round(mean(ARR_DELAY,na.rm=TRUE),2),
+                  avg_dep_delay = round(mean(DEP_DELAY,na.rm=TRUE),2),
+                  avg_distance = round(mean(DISTANCE,na.rm=TRUE),2),
+                  avg_occupancy_rate = round(mean(OCCUPANCY_RATE,na.rm = TRUE),2),
+                  high_occupancy_percentage = round(sum(OCCUPANCY_RATE>=0.75,na.rm=TRUE)/n(),2),
+                  number_of_flights = n()
+                  )
+
+# joining with aggregated airport_codes to get name and type of aiport of origin and destination
+
+
+flights_US_Origin_Desitination_Pairs <- inner_join(flights_US_Origin_Desitination_Pairs,airport_codes_US, by= c('ORIGIN'='IATA_CODE'))
+
+flights_US_Origin_Desitination_Pairs <- inner_join(flights_US_Origin_Desitination_Pairs,airport_codes_US, by= c('DESTINATION'='IATA_CODE'))
+
+flights_US_Origin_Desitination_Pairs <- flights_US_Origin_Desitination_Pairs %>% rename(origin_type = TYPE.x , destination_type = TYPE.y,
+                                                                                        origin_name= NAME.x ,  destination_name = NAME.y)
+
+# Getting unique origin-destination pairs and joining them with the data in the duplicates where destination is the origin and vice-versa
+
+flights_US_Origin_Desitination_Pairs_unique <- flights_US_Origin_Desitination_Pairs[!duplicated(t(apply(flights_US_Origin_Desitination_Pairs[,c('ORIGIN','DESTINATION')], 1, sort))), ]
+
+
+flights_US_Origin_Desitination_Pairs_dropped <- flights_US_Origin_Desitination_Pairs[duplicated(t(apply(flights_US_Origin_Desitination_Pairs[,c('ORIGIN','DESTINATION')], 1, sort))), ]
+
+assessing_assumptions <- left_join(flights_US_Origin_Desitination_Pairs_dropped[,c('ORIGIN','DESTINATION','avg_arr_delay','avg_dep_delay','avg_distance','avg_occupancy_rate','number_of_flights')],flights_US_Origin_Desitination_Pairs_unique[,c('ORIGIN','DESTINATION','avg_arr_delay','avg_dep_delay','avg_distance','avg_occupancy_rate','number_of_flights')],by = c('ORIGIN'='DESTINATION','DESTINATION'='ORIGIN'))
+
+# Ideally in a round trip,  arrival and departure delays are different for different airports and avg distance should be the same.
+# Also, there is a possibility of different occupancy rate for two legs of the round trip
+# Checking to see these assumptions are correct
+
+
+assessing_assumptions %>% 
+  ungroup() %>% 
+    filter(avg_arr_delay.x != 0 & avg_dep_delay.x != 0 & avg_distance.x !=0 & avg_occupancy_rate.x != 0 & number_of_flights.x != 0) %>% 
+  summarise(
+    mean_diff_avg_arr_delay = round(mean((avg_arr_delay.x-avg_arr_delay.y)/avg_arr_delay.x),2)*100,
+    mean_diff_avg_dep_delay = round(mean((avg_dep_delay.x-avg_dep_delay.y)/avg_dep_delay.x),2)*100,
+    mean_diff_avg_distance = round(mean((avg_distance.x-avg_distance.y)/avg_distance.x),2)*100,
+    mean_diff_avg_occupancy_rate = round(mean(avg_occupancy_rate.x-avg_occupancy_rate.y),2)*100,
+    mean_diff_number_of_flights = round(mean((number_of_flights.x-number_of_flights.y)/number_of_flights.x),2)*100
+        )
+
+# As suspected, the arrival and departure delays are different. Also, the occupancy rates for both legs are same. So creating separate columns for just arrival and departure delays for origin and destination
+
+flights_US_Origin_Desitination_Pairs_final <- left_join(flights_US_Origin_Desitination_Pairs_unique,flights_US_Origin_Desitination_Pairs_dropped[,c('ORIGIN','DESTINATION','avg_arr_delay','avg_dep_delay')],by=c('ORIGIN'='DESTINATION','DESTINATION'='ORIGIN'))
+
+
+# If there is no data on the joined record we are replacing it with 0
+
+flights_US_Origin_Desitination_Pairs_final <- 
+  flights_US_Origin_Desitination_Pairs_final %>% 
+    rename(avg_arr_delay_origin = avg_arr_delay.x,avg_dep_delay_origin = avg_dep_delay.x ,avg_arr_delay_destination = avg_arr_delay.y,avg_dep_delay_destination = avg_dep_delay.y) %>%
+      mutate(
+             avg_arr_delay_origin = ifelse(is.na(avg_arr_delay_origin),0,avg_arr_delay_origin),
+             avg_dep_delay_origin = ifelse(is.na(avg_dep_delay_origin),0,avg_dep_delay_origin),
+             avg_arr_delay_destination = ifelse(is.na(avg_arr_delay_destination),0,avg_arr_delay_destination),
+             avg_dep_delay_destination = ifelse(is.na(avg_dep_delay_destination),0,avg_dep_delay_destination))
+```
+
+
+
+
+## Analyzing tickets data and joining it with flights data
+ 
+ 
+```{r}
+tickets_US %>%
+  filter(ROUNDTRIP==1) %>%
+  group_by(ORIGIN_STATE_ABR) %>%
+  summarise(avg_ticket_price=round(mean(ITIN_FARE,na.rm = TRUE)),2) %>%
+  arrange(desc(avg_ticket_price)) %>%
+  head(10 ) %>%
+  ggplot(aes(x=ORIGIN_STATE_ABR,y=avg_ticket_price))+
+  geom_bar(stat = "identity", fill = "#FF5733") + 
+      xlab("Origin State") + 
+        ggtitle('Top 10 Average Roundtrip Price by Origin State') 
+
+tickets_US %>%
+  filter(ROUNDTRIP==1) %>%
+  group_by(ORIGIN) %>%
+  summarise(avg_ticket_price=round(mean(ITIN_FARE,na.rm = TRUE)),2) %>%
+  arrange(desc(avg_ticket_price)) %>%
+  head(10 ) %>%
+  ggplot(aes(x=ORIGIN,y=avg_ticket_price, na.rm = TRUE))+
+  geom_bar(stat = "identity", fill = "#FF5733") + 
+      xlab("Origin State") + 
+        ggtitle('Top 10 Average Roundtrip Price by Origin Airport') 
+
+tickets_US %>%
+  filter(ROUNDTRIP==1) %>%
+  group_by(DESTINATION) %>%
+  summarise(avg_ticket_price=round(mean(ITIN_FARE, na.rm = TRUE)),2) %>%
+  arrange(desc(avg_ticket_price)) %>%
+  head(10 ) %>%
+  ggplot(aes(x=DESTINATION,y=avg_ticket_price))+
+  geom_bar(stat = "identity", fill = "#FF5733") + 
+      xlab("Origin State") + 
+        ggtitle('Top 10 Average Roundtrip Price by Destination Airport') 
+
+
+tickets_US %>%
+  filter(ROUNDTRIP==1) %>%
+  group_by(REPORTING_CARRIER) %>%
+  summarise(avg_ticket_price=round(mean(ITIN_FARE, na.rm = TRUE)),2) %>%
+  arrange(desc(avg_ticket_price))
+
+tickets_US_Origin_Destination_Pairs <- tickets_US %>%
+    filter(ROUNDTRIP == 1) %>% 
+      group_by(ORIGIN,DESTINATION) %>% 
+        summarise(avg_round_trip_cost = round(mean(ITIN_FARE,na.rm = TRUE),2))
+```
+ Findings
+ 
+ 1.Round trips from Hawaii (HI) have the highest average round trip prices at ~$600. Incidentally, Hawaiian Airlines also has the highest average round trip ticket price at $607
+ 2.SHR is the costliest airport to fly from with an average round trip ticket price of ~$1600
+ 3. DUT is the costliest airport to fly into with an average round trip ticket price of ~$1400
+ 
+ 
+ 
+## Creating the final data set by joining flights with airport type and tickets data
+
+
+```{r}
+dataset_final <- left_join(flights_US_Origin_Desitination_Pairs_final, tickets_US_Origin_Destination_Pairs, by = c("ORIGIN" = "ORIGIN", "DESTINATION" = "DESTINATION"))
+```
+
+# Checking final dataset for irregularities- Outliers, Imputing missing values
+```{r}
+summary(dataset_final)
+
+# round_trip cost has 59 NA's
+
+# To impute for missing values lets check relationship between roundtrip cost with number of flights and distance
+
+dataset_final %>% 
+  ggplot(aes(number_of_flights,avg_round_trip_cost)) +
+  geom_point(color = "#f54242",size= 3) +
+  labs(title="Number of flights vs Round Trip Cost", x="Number of Flights", y="Round Trip Cost")
+   
+dataset_final %>% 
+  ggplot(aes(avg_distance,avg_round_trip_cost)) +
+  geom_point(color = "#f54242",size= 3) +
+  labs(title="Average Distance vs Round Trip Cost", x="Distance", y="Round Trip Cost")
+
+# both the plots are almost linear. Given that there are costs associated with distance (Fuel,Oil,Maintenance and Crew, and Depreciation, Insurance, Other) missing round trip costs are imputed based on median distance quartiles
+
+dataset_final <- dataset_final %>% 
+  group_by(ntile(dataset_final$avg_distance, 4)) %>% 
+    mutate(avg_round_trip_cost = ifelse(is.na(avg_round_trip_cost), 
+                            median(avg_round_trip_cost, na.rm = TRUE), 
+                            avg_round_trip_cost)) %>% 
+      ungroup() %>%
+      select (-c(`ntile(dataset_final$avg_distance, 4)`))
+
+# Checking all numerical data for outliers
+
+boxplot(dataset_final$avg_arr_delay_origin,main = "Boxplot of avg_arr_delay_origin")
+
+boxplot(dataset_final$avg_arr_delay_destination,main = "Boxplot of avg_arr_delay_destination")
+
+boxplot(dataset_final$avg_dep_delay_origin,main = "Boxplot of avg_dep_delay_origin")
+
+boxplot(dataset_final$avg_dep_delay_destination,main = "Boxplot of avg_dep_delay_destination")
+
+boxplot(dataset_final$avg_distance,main = "Boxplot of avg_distance")
+
+boxplot(dataset_final$avg_round_trip_cost,main = "Boxplot of avg_round_trip_cost")
+
+# Detecting and capping outliers using Interquartile range and putting them to new columns
+
+treating_outliers <- function(dataset,column_name) {
+  
+qnt <- quantile(unlist(dataset[,column_name]), probs=c(.25, .75), na.rm = T)
+iqr <- 2 * IQR(unlist(dataset[,column_name]), na.rm = T)
+
+varname <- paste(column_name,'_capped',sep='')
+
+  dataset <- dataset %>%
+    mutate(
+           !!varname := round(case_when(!!sym(column_name) >  qnt[2]+iqr ~ qnt[2]+iqr,
+                                     !!sym(column_name) <  qnt[1]-iqr ~ qnt[1]-iqr,
+                                     !!sym(column_name) <= qnt[2]+iqr
+                                   & !!sym(column_name) >= qnt[1]-iqr ~ !!sym(column_name)),2))
+
+  return(dataset)
+}
+
+
+dataset_final <- treating_outliers(dataset_final,'avg_arr_delay_origin')
+dataset_final <- treating_outliers(dataset_final,'avg_arr_delay_destination')
+dataset_final <- treating_outliers(dataset_final,'avg_dep_delay_origin')
+dataset_final <- treating_outliers(dataset_final,'avg_dep_delay_destination')
+dataset_final <- treating_outliers(dataset_final,'avg_distance')
+dataset_final <- treating_outliers(dataset_final,'avg_round_trip_cost')
+
+# checking summary of data set to see max and 3rd quartile values to see the ranges
+
+summary(dataset_final)
+```
+
+# Calculating cost, revenue and profits of the round trip routes
+
+```{r}
+#From the data and assumptions given the PDF, cost is calculated as follows
+
+# Costs = $8*2*Miles + $1.18*2*Miles + $5,000*Medium + $10,000*Large + (Departure Delay-15)*$75 + (Arrival Delay-15)*75 
+dataset_final <- dataset_final %>% 
+  mutate(operating_cost = round(8*2*avg_distance_capped+
+                    1.18*2*avg_distance_capped+
+                    ifelse(origin_type=='medium_airport',5000,10000)+ifelse(destination_type=='medium_airport',5000,10000)+
+                    ifelse(avg_dep_delay_origin_capped-15>0,(avg_dep_delay_origin_capped-15)*75,0)+
+                    ifelse(avg_arr_delay_origin_capped-15>0,(avg_arr_delay_origin_capped-15)*75,0)+
+                    ifelse(avg_dep_delay_destination_capped-15>0,(avg_dep_delay_destination_capped-15)*75,0)+
+                    ifelse(avg_arr_delay_destination_capped-15>0,(avg_arr_delay_destination_capped-15)*75,0),2))
+
+# #From the data and assumptions given the PDF, revenue is calculated as follows
+
+# Revenue = Occupancy*200*Round Trip Price + Occupancy*0.5*200*35(Check-in cost)*2
+dataset_final <- dataset_final %>% 
+  mutate( revenue = round(avg_occupancy_rate*200*avg_round_trip_cost_capped+avg_occupancy_rate*200*0.5*2*35,2))
+
+# Profit = Revenue - Cost 
+ dataset_final <- dataset_final %>% 
+  mutate( profit = revenue-operating_cost)
+summary(dataset_final)   
+```
+
+
+# Analysis of the final data set
+
+Assumptions
+
+The following assumptions from the PDF given for direction are taken into account during the analysis
+
+1. capacity 200 for all the flights which is constant.
+2. 50% passengers have check-in luggage.
+3. No seasonality. Demand is constant
+4. Also as mentioned before,  apart from difference in arrival and departure delays in origin and destination, other variables like distance, round trip cost are the same. So, only one row is used.
+
+ Metadata
+ 
+<img src="C:/Users/sudar/Desktop/Capital One Airline Data challenge/Final_Dataset_metadata.jpg" alt="">
+
+
+```{r}
+
+# checking correlation between the numerical variables especially between arrival delay and departure delay in origin and destination 
+
+
+corrplot(cor(dataset_final[,c('avg_arr_delay_origin_capped',
+                       'avg_dep_delay_origin_capped','avg_arr_delay_destination_capped',
+                               'avg_dep_delay_destination_capped','avg_distance_capped',
+                               'avg_round_trip_cost_capped','avg_occupancy_rate','high_occupancy_percentage',
+                               'number_of_flights'
+)]))
+# histogram for number of flights, average distance, round trip costs
+hist.data.frame(dataset_final[,c('number_of_flights','avg_distance_capped','avg_round_trip_cost_capped')])
+
+# histogram for delays
+hist.data.frame(dataset_final[,c('avg_arr_delay_origin_capped','avg_dep_delay_origin_capped','avg_arr_delay_destination_capped','avg_dep_delay_destination_capped')])
+
+# histogram number occupancy rate and high occupancy Percentage
+hist.data.frame(dataset_final[,c('avg_occupancy_rate','high_occupancy_percentage')])
+
+hist.data.frame(dataset_final[,c()])
+
+hist.data.frame(dataset_final[,c('operating_cost','revenue','profit')])
+
+dataset_final %>%
+  summarise(routes_operating_with_loss = sum(ifelse( profit<0,1,0)),
+            routes_with_less_than_10_trips =sum(ifelse( number_of_flights<10,1,0)),
+            routes_with_less_than_500_trips =sum(ifelse( number_of_flights<500,1,0)))
+
+
+```
+Findings
+1. Less 500 flights are operated between 2258 of the 2828 round trip routes. Also, 86 routes just have less than 10 trips.
+2. High correlation is seen between the arrival and departure delay at both origin and destination
+3. From the histogram of profits, we can see not all round trip routes are operating with a profit.216 routes are operating with a loss.
+4. Avg Occupancy rate of most routes are at 65%
+5. For every round trip route there at most 50% of high occupancy percentage. i.e. At-most 50% of the flights operated between any routes have an occupancy rate of >=75%
+
+
+# Answering the questions
+
+```{r}
+
+# creating a column for route pair
+ dataset_final <- dataset_final %>% 
+  mutate( Route = paste(ORIGIN,DESTINATION, sep='-'))
+
+# creating reporting dataset contianing required columns
+
+reporting_dataset <- dataset_final %>% select(Route,ORIGIN,ORIGIN_CITY_NAME,origin_type,DESTINATION,DEST_CITY_NAME,destination_type,avg_occupancy_rate,high_occupancy_percentage,number_of_flights,avg_distance_capped,avg_round_trip_cost_capped,operating_cost,revenue,profit,avg_arr_delay_origin_capped,avg_dep_delay_origin_capped,avg_arr_delay_destination_capped,avg_dep_delay_destination_capped)
+
+top_n_bar <- function(data, col1, col2, n, title, xaxis, yaxis){
+  
+  col1 <- enquo(col1)
+  
+  col2 <- enquo(col2)
+  
+  graph_name <- title
+  
+  graph_data <- data %>% arrange(desc(!!col2)) %>% head(n)
+  
+    graph_data %>% 
+    ggplot(aes(x = reorder(!!col1, -(!!col2)), y = !!col2, fill = !!col1)) +
+    geom_bar(stat = "identity") +
+    theme(legend.position = "none", axis.text.x = element_text(size = 5)) +
+    
+    labs(x = xaxis, y = yaxis, title = graph_name)
+  
+}
+
+top_n_table <- function(data, col1, n, title){
+    
+  graph_name = title
+  col1 <- enquo(col1)
+  
+  data %>% arrange(desc(!!col1)) %>% head(n) %>% 
+   gt() %>% 
+   tab_header(title = graph_name)
+}
+
+```
+
+## 1. Top 10 routes in terms of number of round trip flights
+```{r}
+top_n_bar(reporting_dataset,Route,number_of_flights,10, "Top 10 Busiest Routes by number of Flights","Route","Number of Flights")
+top_n_table(reporting_dataset,number_of_flights,10,"Top 10 Busiest Routes by number of Flights")
+```
+
+## 2. Top 10 Profitable routes
+
+```{r}
+top_n_bar(reporting_dataset,Route,profit,10, "Top 10 Profitable Routes","Route","Profit")
+top_n_table(reporting_dataset,profit,10,"Top 10 Profitable Routes")
+
+#  When we look at the table two routes (GSP-SFO, BHM-SJC) just have 1 round flight operated. Lets look at the Top 10 profitable routes with atleast 10 flights operated
+
+top_n_bar( reporting_dataset %>% filter(number_of_flights >= 10),Route,profit,10, "Top 10 Profitable Routes","Route","Profit")
+top_n_table( reporting_dataset %>% filter(number_of_flights >= 10),profit,10,"Top 10 Profitable Routes")
+```
+
+## 3. Recommendations on investing in top routes
+ 
+We will be taking into account various factors to choose the routes to invest in. So we will be making use of quartiles of various metrics to arrive at the recommendation. We will be recommending routes that fall in the first quartile of average occupancy rate, first quartile of avg high occupancy percentage,
+first quartile of number of flights operated in that route and bottom three quartiles of avg delays(arrival and departure delays of origin and departure summed up)(keeping bottom quartile alone did not fetch the required records)
+
+```{r}
+flights_to_invest_in <- reporting_dataset %>% 
+  mutate(quartile_number_of_flights = ntile(number_of_flights, 4),
+         quartile_avg_occupancy_rate = ntile(avg_occupancy_rate, 4),
+         quartile_high_occupancy_percentage = ntile(high_occupancy_percentage, 4),
+         quartile_profit = ntile(profit, 4),
+         quartile_delays = ntile(avg_arr_delay_origin_capped+avg_dep_delay_origin_capped+avg_arr_delay_destination_capped+avg_dep_delay_destination_capped, 4))  %>%
+    filter(quartile_number_of_flights == 4 & quartile_avg_occupancy_rate == 4 & quartile_high_occupancy_percentage == 4 & quartile_profit == 4 & (quartile_delays == 1 |quartile_delays == 2 |quartile_delays == 3))
+
+top_n_table(flights_to_invest_in,Route,6,"Routes to Invest In")
+```
+
+## 4. Number of Round trips taken to break even airplane cost of $90 million
+
+Also, calculating the time required to break even assuming daily round trips for all the routes
+
+```{r}
+flights_to_invest_in <- flights_to_invest_in %>% mutate(round_trips_taken_to_break_even = round(90000000/profit,0),
+             years_to_break_even = round(90000000/(profit*7*4*12),0))
+
+top_n_table(flights_to_invest_in,Route,6,"Reccommended Routes to Invest In")
+
+top_n_bar(flights_to_invest_in,Route,round_trips_taken_to_break_even,6, "Round trips it will take to break even","Route","Round Trips")
+top_n_bar(flights_to_invest_in,Route,years_to_break_even,6, "Years it will take to break even","Route","Years")
+
+flights_to_invest_in %>%
+              summarise(avg_round_trips=mean(number_of_flights),
+                        avg_profit=mean(profit),
+                        avg_round_trips_to_break_even=mean(round_trips_taken_to_break_even),
+                        avg_years_to_break_even = mean(years_to_break_even))
+```
+
+### Insights
+
+On these six recommended routes 497 flights are operated on an average with an average profit of $49,390.It will take the business average of 1880 routes to be operated on these routes. Assuming that, there are 1 daily round trips are operated on these routes with 7 flights a week, it will take 5.8 years years to break-even on flight costs of all these routes.
+This set of routes are recommended with a view on reducing the risks of low occupancy rate, low occupancy percentage and high delays and increasing the profits. Recommendations will differ if the business wants to opt for a different strategy. Based on the strategic preferences of the business the metrics used to arrive at these recommendations can be tweaked to created a weighted score metric and a different set of routes could be proposed based on that weighted score metric.
+
+## 5. KPIs to be tracked
+To gauge the success of our selected route set we should track the following KPIs
+
+Operating cost - 
+In real world operating costs tend to fluctuate. Tracking this will helps understand the factors influencing the costs such as jet fuel expenses , labor costs. It will also help us identify those factors affecting operating costs which was previously not taken into consideration.
+
+Occupancy rate -
+Occupancy rates need to be tracked and bench marked against average occupancy rates of other airlines in the same routes. Low occupancy rates could be indicative of 
+poor airline performance
+
+Average arrival and departure delays
+Delay free air travel is what everyone aims for. Departure and arrival delay can increase operating costs and also reduce customer satisfaction. Reasons for delay can also be added to see if external factors like weather, airport constructions are effecting performances.
+
+Ticket prices
+Dynamic pricing is followed in airline industry and tracking average round trip prices of competitors will help us price our tickets in an optimum manner and help us position our services and attract appropriate customers.
+
+Market share vs Demand
+Market share helps us understand how much of the demand are we catering to. This can be analyzed with occupancy rate to see if we are capturing targeted market share.
+We could also use other airlines market share to identify if the demand is more than the supply so that frequency in the routes can be increased.
+
+Total Ticket Bookings:
+We can track the total tickets booked and measure it against cancelled tickets and the occupancy of the routes
+
+Cancellation rates:
+This can be monitored and benchmark against cancellations across all the careers to assess aircraft performance 
+
+In addition to these metrics, revenue and profit can be tracked too
+
+# Next Steps
+
+
+1. Using the KPIs that have been suggested, we need to track the performance of airlines on these routes 
+and closely follow demand and fluctuations in demand. By knowing the fluctuations in demand we can alter our schedules and if there are routes which are 
+operating in losses, new routes should be identified based on current demand by using a pivot strategy. 
+2. Taking seasonality into account will help us make an better informed decision in better scheduling our routes and the frequency of these routes.We also closely need to monitor our competitors in these routes by tracking the frequency of their operations in these routes. Gathering competitor data can help us identify new demands, new customer segments and new markets that have still not been tapped and use it to our advantage in making decisions.
+3. Fuel is a very big cost component of operating cost. We need to start gathering data points that affect fuel consumption such airport elevation, average load of the aircraft, average optimum flying altitude of aircraft in these routes to better predict the fuel consumption and forecast operating costs efficiently.
+4. We can use the total ticket bookings data and compare them against cancellations and occupancy rate of routes to see if we are utilizing the maximum possible over booking threshold and maximize our profits. If bookings are scares but the demand is high, we need to devise an customer acquisition strategy to attract more customers
+
+
+
+<a href="#top">Back to top</a>
